@@ -25,7 +25,7 @@ endif
 # Make version suffix -beta.NNNN.CCCCCCCC (N=Commit number, C=Commit)
 VERSION_SUFFIX := -beta.$(shell git rev-list --count HEAD).$(shell git show --no-patch --no-notes --pretty='%h' HEAD)
 # TAG is current version + commit number + commit + branch
-TAG := $(VERSION)$(VERSION_SUFFIX)$(TAG_BRANCH)
+TAG := $(VERSION)$(VERSION_SUFFIX)$(TAG_BRANCH)-kakaoenterprise
 ifdef RELEASE_TAG
 	TAG := $(RELEASE_TAG)
 endif

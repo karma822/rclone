@@ -368,6 +368,11 @@ type Object struct {
 	contentType  string
 	md5          string
 	headers      swift.Headers // The object headers if known
+	metadata     map[string]string
+}
+
+func (o *Object) Metadata(ctx context.Context) (fs.Metadata, error) {
+	return o.metadata, nil
 }
 
 // ------------------------------------------------------------
@@ -592,15 +597,14 @@ func NewFsWithConnection(ctx context.Context, opt *Options, name, root string, c
 	}
 	if f.rootContainer != "" && f.rootDirectory != "" {
 		// Check to see if the object exists - ignoring directory markers
-		var info swift.Object
 		var err error
 		encodedDirectory := f.opt.Enc.FromStandardPath(f.rootDirectory)
 		err = f.pacer.Call(func() (bool, error) {
 			var rxHeaders swift.Headers
-			info, rxHeaders, err = f.c.Object(ctx, f.rootContainer, encodedDirectory)
+			_, rxHeaders, err = f.c.Object(ctx, f.rootContainer, encodedDirectory)
 			return shouldRetryHeaders(ctx, rxHeaders, err)
 		})
-		if err == nil && info.ContentType != directoryMarkerContentType {
+		if err == nil {
 			newRoot := path.Dir(f.root)
 			if newRoot == "." {
 				newRoot = ""
@@ -638,8 +642,9 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 // If it can't be found it returns the error fs.ErrorObjectNotFound.
 func (f *Fs) newObjectWithInfo(ctx context.Context, remote string, info *swift.Object) (fs.Object, error) {
 	o := &Object{
-		fs:     f,
-		remote: remote,
+		fs:       f,
+		remote:   remote,
+		metadata: make(map[string]string),
 	}
 	// Note that due to a quirk of swift, dynamic large objects are
 	// returned as 0 bytes in the listing.  Correct this here by
@@ -1411,6 +1416,25 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	err = o.fs.pacer.Call(func() (bool, error) {
 		var rxHeaders swift.Headers
 		in, rxHeaders, err = o.fs.c.ObjectOpen(ctx, container, containerPath, !isRanging, headers)
+		if err != nil || len(rxHeaders) == 0 {
+			return shouldRetryHeaders(ctx, rxHeaders, err)
+		}
+
+		o.metadata = rxHeaders.Metadata("X-Object-Meta-")
+
+		if v, ok := rxHeaders["Content-Disposition"]; ok {
+			o.metadata["Content-Disposition"] = v
+		}
+		if v, ok := rxHeaders["Content-Encoding"]; ok {
+			o.metadata["Content-Encoding"] = v
+		}
+		if v, ok := rxHeaders["Content-Language"]; ok {
+			o.metadata["Content-Language"] = v
+		}
+		if v, ok := rxHeaders["Cache-Control"]; ok {
+			o.metadata["Cache-Control"] = v
+		}
+
 		return shouldRetryHeaders(ctx, rxHeaders, err)
 	})
 	return
@@ -1534,8 +1558,24 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		segmentsContainer, segments, _ = o.getSegmentsLargeObject(ctx)
 	}
 
-	// Set the mtime
 	m := swift.Metadata{}
+	ci := fs.GetConfig(ctx)
+	if ci.Metadata {
+		metadataOptions, err := fs.GetMetadataOptions(ctx, o.fs, src, options)
+		if err != nil {
+			return fmt.Errorf("failed to read metadata from source object: %w", err)
+		}
+
+		for k, v := range metadataOptions {
+			switch k {
+			case "Cache-Control", "Content-Disposition", "Content-Encoding", "Content-Language", "Content-Type":
+				options = append(options, &fs.HTTPOption{Key: k, Value: v})
+			default:
+				m[k] = v
+			}
+		}
+	}
+	// Set the mtime
 	m.SetModTime(modTime)
 	contentType := fs.MimeType(ctx, src)
 	headers := m.ObjectHeaders()
