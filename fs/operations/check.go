@@ -127,7 +127,7 @@ func (c *checkMarch) checkIdentical(ctx context.Context, dst, src fs.Object) (di
 		tr.Done(ctx, err)
 	}()
 	if sizeDiffers(ctx, src, dst) {
-		err = fmt.Errorf("sizes differ")
+		err = fmt.Errorf("sizes differ %d / %d", src.Size(), dst.Size())
 		fs.Errorf(src, "%v", err)
 		return true, false, nil
 	}

@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ncw/swift/v2"
+	swift "github.com/ncw/swift/v2"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configmap"
@@ -1337,6 +1337,20 @@ func (o *Object) readMetaData(ctx context.Context) (err error) {
 	container, containerPath := o.split()
 	err = o.fs.pacer.Call(func() (bool, error) {
 		info, h, err = o.fs.c.Object(ctx, container, containerPath)
+		o.metadata = h.Metadata("X-Object-Meta-")
+		if v, ok := h["Content-Disposition"]; ok {
+			o.metadata["Content-Disposition"] = v
+		}
+		if v, ok := h["Content-Encoding"]; ok {
+			o.metadata["Content-Encoding"] = v
+		}
+		if v, ok := h["Content-Language"]; ok {
+			o.metadata["Content-Language"] = v
+		}
+		if v, ok := h["Cache-Control"]; ok {
+			o.metadata["Cache-Control"] = v
+		}
+
 		return shouldRetryHeaders(ctx, h, err)
 	})
 	if err != nil {
@@ -1404,7 +1418,7 @@ func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
 // It compares the Content-Type to directoryMarkerContentType - that
 // makes it a directory marker which is not storable.
 func (o *Object) Storable() bool {
-	return o.contentType != directoryMarkerContentType
+	return true
 }
 
 // Open an object for read
